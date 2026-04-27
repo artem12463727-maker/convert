@@ -1,0 +1,21 @@
+name: Build EXE
+on: [push]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install pyinstaller pygame
+      - name: Build with PyInstaller
+        run: pyinstaller --onefile "придумайтеназвание.py"
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-app-exe
+          path: dist/*.exe
+          
