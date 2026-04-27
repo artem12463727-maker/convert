@@ -12,7 +12,7 @@ jobs:
       - name: Install dependencies
         run: pip install pyinstaller pygame
       - name: Build with PyInstaller
-        run: pyinstaller --onefile "придумайтеназвание.py"
+        run: pyinstaller --onefile "stealer.py"
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
